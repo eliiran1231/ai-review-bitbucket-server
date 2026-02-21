@@ -32,7 +32,7 @@ def get_openrouter_http_client() -> OpenRouterHTTPClient:
         transport=AsyncHTTPTransport(verify=settings.vcs.http_client.verify)
     )
 
-    headers = {"Authorization": f"Bearer {settings.llm.http_client.api_token_value}"}
+    headers = settings.llm.http_client.authorization_headers
     if settings.llm.meta.title:
         headers["X-Title"] = settings.llm.meta.title
 
