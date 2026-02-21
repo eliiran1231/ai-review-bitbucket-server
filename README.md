@@ -113,6 +113,7 @@ llm:
     timeout: 120
     api_url: https://api.openai.com/v1
     api_token: ${OPENAI_API_KEY}
+    api_token_scheme: Bearer
 
 vcs:
   provider: GITLAB
@@ -125,6 +126,7 @@ vcs:
     timeout: 120
     api_url: https://gitlab.com
     api_token: ${GITLAB_API_TOKEN}
+    api_token_scheme: Bearer 
 ```
 
 👉 This will:
