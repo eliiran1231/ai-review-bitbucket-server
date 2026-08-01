@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from ai_review.clients.bitbucket_server.pr.schema.comments import BitbucketServerCommentSchema
 

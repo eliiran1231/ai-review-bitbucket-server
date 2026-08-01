@@ -1,10 +1,13 @@
 import pytest
 
-from ai_review.services.llm.types import ChatResultSchema
+from ai_review.services.cost.schema import CalculateCostSchema
+from ai_review.services.review.gateway.review_agent_llm_gateway import ReviewAgentLLMGateway
 from ai_review.services.review.gateway.review_comment_gateway import ReviewCommentGateway
+from ai_review.services.review.gateway.review_direct_llm_gateway import ReviewDirectLLMGateway
 from ai_review.services.review.gateway.review_dry_run_comment_gateway import ReviewDryRunCommentGateway
 from ai_review.services.review.service import ReviewService
 from ai_review.tests.fixtures.services.cost import FakeCostService
+from ai_review.tests.fixtures.services.review.gateway.review_comment_gateway import FakeReviewCommentGateway
 from ai_review.tests.fixtures.services.review.runner.context import FakeContextReviewRunner
 from ai_review.tests.fixtures.services.review.runner.inline import FakeInlineReviewRunner
 from ai_review.tests.fixtures.services.review.runner.inline_reply import FakeInlineReplyReviewRunner
@@ -70,9 +73,7 @@ def test_report_total_cost_with_data(
     """Should log total cost when cost report exists."""
     fake_cost_service.reports.append(
         fake_cost_service.calculate(
-            result=ChatResultSchema(
-                text="result",
-                total_tokens=100,
+            result=CalculateCostSchema(
                 prompt_tokens=50,
                 completion_tokens=10,
             )
@@ -100,7 +101,7 @@ def test_review_service_uses_dry_run_comment_gateway(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("ai_review.config.settings.review.dry_run", True)
 
     service = ReviewService()
-    assert type(service.review_comment_gateway) is ReviewDryRunCommentGateway
+    assert type(service.review_comment_gateway) is ReviewDryRunCommentGateway  # noqa
 
 
 def test_review_service_uses_real_comment_gateway(monkeypatch: pytest.MonkeyPatch):
@@ -108,4 +109,77 @@ def test_review_service_uses_real_comment_gateway(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("ai_review.config.settings.review.dry_run", False)
 
     service = ReviewService()
-    assert type(service.review_comment_gateway) is ReviewCommentGateway
+    assert type(service.review_comment_gateway) is ReviewCommentGateway  # noqa
+
+
+def test_review_service_initializes_agent_components():
+    service = ReviewService()
+    assert service.agent_loop is not None
+    assert type(service.review_direct_llm_gateway) is ReviewDirectLLMGateway  # noqa
+
+
+def test_review_service_uses_agent_gateway_when_enabled(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("ai_review.config.settings.agent.enabled", True)
+    service = ReviewService()
+    assert type(service.review_llm_gateway) is ReviewAgentLLMGateway
+
+
+def test_review_service_uses_default_gateway_when_agent_disabled(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("ai_review.config.settings.agent.enabled", False)
+    service = ReviewService()
+    assert type(service.review_llm_gateway) is ReviewDirectLLMGateway
+
+
+@pytest.mark.asyncio
+async def test_context_manager_finalizes_gateway(
+        review_service: ReviewService,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    """Leaving the ReviewService context should finalize the comment gateway."""
+    review_service.review_comment_gateway = fake_review_comment_gateway
+
+    async with review_service:
+        assert not any(call[0] == "finalize" for call in fake_review_comment_gateway.calls)
+
+    assert any(call[0] == "finalize" for call in fake_review_comment_gateway.calls)
+
+
+@pytest.mark.asyncio
+async def test_context_manager_finalizes_gateway_on_error(
+        review_service: ReviewService,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    """Should finalize the comment gateway even when the pipeline raises."""
+    review_service.review_comment_gateway = fake_review_comment_gateway
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with review_service:
+            raise RuntimeError("boom")
+
+    assert any(call[0] == "finalize" for call in fake_review_comment_gateway.calls)
+
+
+@pytest.mark.asyncio
+async def test_run_clear_inline_review_does_not_finalize_gateway(
+        review_service: ReviewService,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    """Clear-inline is a cleanup command and should not publish pending batched comments."""
+    review_service.review_comment_gateway = fake_review_comment_gateway
+
+    await review_service.run_clear_inline_review()
+
+    assert fake_review_comment_gateway.calls == [("clear_inline_comments", {})]
+
+
+@pytest.mark.asyncio
+async def test_run_clear_summary_review_does_not_finalize_gateway(
+        review_service: ReviewService,
+        fake_review_comment_gateway: FakeReviewCommentGateway,
+):
+    """Clear-summary is a cleanup command and should not publish pending batched comments."""
+    review_service.review_comment_gateway = fake_review_comment_gateway
+
+    await review_service.run_clear_summary_review()
+
+    assert fake_review_comment_gateway.calls == [("clear_summary_comments", {})]

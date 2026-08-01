@@ -1,6 +1,7 @@
 import re
 
 from ai_review.libs.logger import get_logger
+from ai_review.services.agent.loop.schema import AgentTraceSchema
 from ai_review.services.diff.schema import DiffFileSchema
 from ai_review.services.vcs.types import ReviewThreadSchema
 
@@ -43,3 +44,28 @@ def normalize_prompt(text: str) -> str:
         return result
 
     return text
+
+
+def format_trace(trace: AgentTraceSchema) -> str:
+    lines = [f"Iteration: {trace.iteration}"]
+
+    if trace.step.command:
+        lines.append(f"Command: {trace.step.command}")
+
+    if trace.tool_output:
+        lines.append(f"Tool output: {trace.tool_output}")
+
+    if trace.step.content:
+        lines.append(f"Content: {trace.step.content}")
+
+    if trace.warning:
+        lines.append(f"Warning: {trace.warning}")
+
+    return "\n".join(lines)
+
+
+def format_traces(traces: list[AgentTraceSchema]) -> str:
+    if not traces:
+        return "No previous steps."
+
+    return "\n\n---\n\n".join(map(format_trace, traces))

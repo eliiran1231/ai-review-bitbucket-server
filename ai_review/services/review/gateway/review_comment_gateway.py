@@ -8,7 +8,12 @@ from ai_review.services.review.internal.inline.schema import InlineCommentListSc
 from ai_review.services.review.internal.inline_reply.schema import InlineCommentReplySchema
 from ai_review.services.review.internal.summary.schema import SummaryCommentSchema
 from ai_review.services.review.internal.summary_reply.schema import SummaryCommentReplySchema
-from ai_review.services.vcs.types import VCSClientProtocol, ReviewThreadSchema, ReviewCommentSchema
+from ai_review.services.vcs.types import (
+    VCSClientProtocol,
+    ReviewThreadSchema,
+    ReviewCommentSchema,
+    SupportsBatchedComments,
+)
 
 logger = get_logger("REVIEW_COMMENT_GATEWAY")
 
@@ -95,7 +100,18 @@ class ReviewCommentGateway(ReviewCommentGatewayProtocol):
 
             if settings.review.inline_comment_fallback:
                 logger.warning(f"Falling back to general comment for {comment.file}:{comment.line}")
-                await self.process_summary_comment(SummaryCommentSchema(text=comment.fallback_body))
+                await self.process_inline_fallback_comment(SummaryCommentSchema(text=comment.fallback_body))
+
+    async def process_inline_fallback_comment(self, comment: SummaryCommentSchema) -> None:
+        try:
+            await hook.emit_summary_comment_start(comment)
+            await self.vcs.create_general_comment(comment.body_with_fallback_tag)
+            await hook.emit_summary_comment_complete(comment)
+
+            await self.artifacts.save_vcs_summary(comment)
+        except Exception as error:
+            logger.exception(f"Failed to process inline fallback comment: {comment} — {error}")
+            await hook.emit_summary_comment_error(comment)
 
     async def process_summary_comment(self, comment: SummaryCommentSchema) -> None:
         try:
@@ -110,6 +126,15 @@ class ReviewCommentGateway(ReviewCommentGatewayProtocol):
 
     async def process_inline_comments(self, comments: InlineCommentListSchema) -> None:
         await bounded_gather([self.process_inline_comment(comment) for comment in comments.root])
+
+    async def finalize(self) -> None:
+        if not isinstance(self.vcs, SupportsBatchedComments):
+            return
+
+        try:
+            await self.vcs.publish_comments()
+        except Exception as error:
+            logger.exception(f"Failed to publish batched comments: {error}")
 
     async def clear_inline_comments(self) -> None:
         await hook.emit_clear_inline_comments_start()

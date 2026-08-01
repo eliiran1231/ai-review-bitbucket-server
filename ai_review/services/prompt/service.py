@@ -1,7 +1,14 @@
 from ai_review.config import settings
+from ai_review.services.agent.loop.schema import AgentTraceSchema
 from ai_review.services.diff.schema import DiffFileSchema
 from ai_review.services.prompt.schema import PromptContextSchema
-from ai_review.services.prompt.tools import normalize_prompt, format_file, format_thread, format_files
+from ai_review.services.prompt.tools import (
+    format_file,
+    format_files,
+    format_thread,
+    format_traces,
+    normalize_prompt,
+)
 from ai_review.services.prompt.types import PromptServiceProtocol
 from ai_review.services.vcs.types import ReviewThreadSchema
 
@@ -16,6 +23,26 @@ class PromptService(PromptServiceProtocol):
             prompt = normalize_prompt(prompt)
 
         return prompt
+
+    @classmethod
+    def build_agent_request(
+            cls,
+            traces: list[AgentTraceSchema],
+            force_final: bool,
+            original_prompt: str,
+            original_prompt_system: str,
+    ) -> str:
+        mode = "Return FINAL only." if force_final else "You can either call a tool or return FINAL."
+        history = format_traces(traces)
+        agent_prompt = cls.prepare_prompt(settings.prompt.load_agent(), PromptContextSchema())
+
+        return (
+            f"{agent_prompt}\n\n"
+            f"## Agent mode\n{mode}\n\n"
+            f"## Task output format\n{original_prompt_system}\n\n"
+            f"## Task\n{original_prompt}\n\n"
+            f"## Agent history\n{history}\n\n"
+        )
 
     @classmethod
     def build_inline_request(cls, diff: DiffFileSchema, context: PromptContextSchema) -> str:
@@ -82,6 +109,10 @@ class PromptService(PromptServiceProtocol):
             f"## Changes\n\n"
             f"{changes}"
         )
+
+    @classmethod
+    def build_system_agent_request(cls) -> str:
+        return cls.prepare_prompt(settings.prompt.load_system_agent(), PromptContextSchema())
 
     @classmethod
     def build_system_inline_request(cls, context: PromptContextSchema) -> str:
